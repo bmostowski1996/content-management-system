@@ -1,7 +1,4 @@
-DROP DATABASE IF EXISTS company_db;
-CREATE DATABASE company_db;
-
-\c company_db;
+-- I will automatically execute this with a pool query.
 
 CREATE TABLE department (
     id SERIAL PRIMARY KEY,
