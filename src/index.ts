@@ -1,5 +1,7 @@
 import inquirer from 'inquirer'; // We need this for the CLI
 
+import Table from 'cli-table3';
+
 import { QueryResult } from 'pg';
 import { pool, connectToDb } from './connection.js';
 
@@ -34,7 +36,7 @@ class Cli {
         try {
             const schemaFile = readFileSync(this.schemaPath, 'utf8'); // Read SQL file content
             await pool.query(schemaFile); // Execute SQL
-            console.log(`Initialized database schema!`);
+            console.log('\n' + `Initialized database schema!`);
 
             const seedsFile = readFileSync(this.seedsPath, 'utf8'); // Read SQL file content
             await pool.query(seedsFile); // Execute SQL
@@ -92,6 +94,10 @@ class Cli {
             case 'Add an employee':
                 await this.addEmployee();
                 break;
+            
+            case 'Update an employee':
+                await this.updateEmployee();
+                break;
 
             default:
         };
@@ -144,7 +150,26 @@ class Cli {
             if (err) {
               console.log(err);
             } else {
-              console.log(result.rows);
+                // Building our table for display
+                // We need the components for the table first
+                const tableData = result.rows;
+                const tableHead = Object.getOwnPropertyNames(result.rows[0]);
+                const tableWidths = Array.from({ length: tableHead.length }, (_,_i) => 15);
+                
+                // Let's build the table
+                let table = new Table({
+                    head: tableHead, 
+                    colWidths: tableWidths
+                });
+
+                // But don't forget to push data to it!
+                for (let i=0; i < tableData.length; i++) {
+                    const tableRow = Array.from({ length: tableHead.length }, (_,j) => tableData[i][tableHead[j]]);
+                    table.push(tableRow);
+                }
+
+                console.log('\n' + table.toString());
+                // console.log(result.rows);
             }
           });
     }
@@ -297,7 +322,7 @@ class Cli {
             {
                 type: 'list',
                 name: 'empManager',
-                message: 'Which role does the employee have?',
+                message: 'Who is this employee\'s manager?',
                 choices: empInfo
             },
         ]);
@@ -313,6 +338,72 @@ class Cli {
             }
         });
     };
+
+    async updateEmployee(): Promise<void> {
+
+        // Prompt the user for the employee whose info they want to update
+        // But first, we need to figure out who our employees are to begin with!
+        const empInfo = await this.getEmployees();
+        empInfo.push({value: null, name: 'No one'});
+
+        const { empToUpdate } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'empToUpdate',
+                message: 'Which employee do you want to update?',
+                choices: empInfo
+            },
+        ]);
+
+        // If for whatever reason they user picked "No one", they should be returned to the main menu.
+        if (empToUpdate !== 'No one') {
+
+            // Prompt the user for the new role this employee is to assume
+            const empRoles = await this.getRoles();
+            const { newRole } = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'newRole',
+                    message: 'What role does this employee have?',
+                    choices: empRoles
+                },
+            ]);
+
+            // Prompt the user for the new manager this employee is to have
+            const empInfo = await this.getEmployees();
+            // Indexing for SQL starts at one, but in .js it starts at 0...
+            empInfo[empToUpdate-1].name = 'No one';
+
+            let { newManager } = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'newManager',
+                    message: 'Who is this employee\'s new manager?',
+                    choices: empInfo
+                },
+            ]);
+            
+            if (newManager === empToUpdate) {
+                newManager = null;
+            }
+            // Once we have everything, let's update our database with the new entry
+            const query = `
+                UPDATE employee
+                SET
+                    role_id = $1,
+                    manager_id = $2
+                WHERE id = $3;
+            `;
+            this.pool.query(query, [newRole, newManager, empToUpdate], 
+                (err: Error, _result: QueryResult) => {
+                    if (err) {
+                        console.log(err);
+                    } else {
+                        console.log(`Employee updated!`);
+                    }
+            });
+        }
+    }
 }
 
 const cli = new Cli(pool);

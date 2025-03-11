@@ -1,4 +1,5 @@
 import inquirer from 'inquirer'; // We need this for the CLI
+import Table from 'cli-table3';
 import { pool, connectToDb } from './connection.js';
 // I will use this to help me execute .sql files in the code.
 import { readFileSync } from 'fs';
@@ -45,7 +46,7 @@ class Cli {
         try {
             const schemaFile = readFileSync(this.schemaPath, 'utf8'); // Read SQL file content
             await pool.query(schemaFile); // Execute SQL
-            console.log(`Initialized database schema!`);
+            console.log('\n' + `Initialized database schema!`);
             const seedsFile = readFileSync(this.seedsPath, 'utf8'); // Read SQL file content
             await pool.query(seedsFile); // Execute SQL
             console.log(`Initialized database seeds!`);
@@ -92,6 +93,12 @@ class Cli {
             case 'Add a role':
                 await this.addRole();
                 break;
+            case 'Add an employee':
+                await this.addEmployee();
+                break;
+            case 'Update an employee':
+                await this.updateEmployee();
+                break;
             default:
         }
         ;
@@ -135,33 +142,45 @@ class Cli {
                 JOIN department ON role.department = department.id;
             `;
         }
+        else {
+            query = `SELECT * FROM ${category};`;
+        }
         await this.pool.query(query, (err, result) => {
             if (err) {
                 console.log(err);
             }
             else {
-                console.log(result.rows);
+                // Building our table for display
+                // We need the components for the table first
+                const tableData = result.rows;
+                const tableHead = Object.getOwnPropertyNames(result.rows[0]);
+                const tableWidths = Array.from({ length: tableHead.length }, (_, _i) => 15);
+                // Let's build the table
+                let table = new Table({
+                    head: tableHead,
+                    colWidths: tableWidths
+                });
+                // But don't forget to push data to it!
+                for (let i = 0; i < tableData.length; i++) {
+                    const tableRow = Array.from({ length: tableHead.length }, (_, j) => tableData[i][tableHead[j]]);
+                    table.push(tableRow);
+                }
+                console.log('\n' + table.toString());
+                // console.log(result.rows);
             }
         });
     }
     async getDepartments() {
         const query = `SELECT * FROM department;`;
-        let queryResult = [];
-        const departments = [];
-        await this.pool.query(query, (err, result) => {
-            if (err) {
-                console.log(`Error from getDepartments: ${err}`);
-            }
-            else {
-                console.log(result.rows);
-                queryResult = result.rows;
-            }
-        });
-        for (let i = 0; i < queryResult.length; i++) {
-            console.log(queryResult[i]);
-            departments.push(queryResult[i].name);
+        try {
+            const result = await this.pool.query(query);
+            const returnVal = result.rows.map(({ id, name }) => ({ value: id, name }));
+            return returnVal;
         }
-        return departments;
+        catch (err) {
+            console.log('Error getting departments!');
+            return [];
+        }
     }
     async addDepartment() {
         // Get the name of the new department
@@ -183,37 +202,174 @@ class Cli {
         });
     }
     ;
+    async getRoles() {
+        const query = `SELECT id, title FROM role;`;
+        try {
+            const result = await this.pool.query(query);
+            const returnVal = result.rows.map(({ id, title }) => ({ value: id, name: title }));
+            return returnVal;
+        }
+        catch (err) {
+            console.log('Error getting roles!');
+            return [];
+        }
+    }
     async addRole() {
         // Get the name of the Role
-        // const { roleName } = await inquirer.prompt([
-        //     {
-        //         type: 'input',
-        //         name: 'roleName',
-        //         message: 'Enter the name of the role:'
-        //     },
-        // ]);
-        // const { roleSalary } = await inquirer.prompt([
-        //     {
-        //         type: 'input',
-        //         name: 'roleSalary',
-        //         message: 'Enter the role salary:'
-        //     },
-        // ]);
-        // const { roleDepartment } = await inquirer.prompt([
-        //     {
-        //         type: 'list',
-        //         name: 'roleDepartment',
-        //         message: 'Which department does the role belong to?',
-        //         choices: ['foo', 'goo']
-        //     },
-        // ]);
-        const departmentList = await this.getDepartments();
-        console.log(departmentList);
+        const { roleName } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'roleName',
+                message: 'Enter the name of the role:'
+            },
+        ]);
+        const { roleSalary } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'roleSalary',
+                message: 'Enter the role salary:'
+            },
+        ]);
+        const departmentInfo = await this.getDepartments();
+        const { roleDepartment } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'roleDepartment',
+                message: 'Which department does the role belong to?',
+                choices: departmentInfo
+            },
+        ]);
+        // Once we have everything, let's add our new role to the database
+        this.pool.query(`INSERT INTO role (title, salary, department) VALUES ($1, $2, $3);`, [roleName, roleSalary, roleDepartment], (err, _result) => {
+            if (err) {
+                console.log(err);
+            }
+            else {
+                console.log(`New role ${roleName} successfully added!`);
+            }
+        });
     }
     ;
+    async getEmployees() {
+        const query = `SELECT id, first_name, last_name FROM employee;`;
+        try {
+            const result = await this.pool.query(query);
+            const returnVal = result.rows.map(({ id, first_name, last_name }) => ({ value: id, name: first_name + ' ' + last_name }));
+            return returnVal;
+        }
+        catch (err) {
+            console.log('Error getting employees!');
+            return [];
+        }
+    }
     async addEmployee() {
+        // Get the Employee's first name
+        const { empFirstName } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'empFirstName',
+                message: 'Enter the employee\'s first name:'
+            },
+        ]);
+        // Get the Employee's last name
+        const { empLastName } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'empLastName',
+                message: 'Enter the employee\'s last name:'
+            },
+        ]);
+        // Get the Employee's role
+        const rolesInfo = await this.getRoles();
+        const { empRole } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'empRole',
+                message: 'Which role does the employee have?',
+                choices: rolesInfo
+            },
+        ]);
+        // Get the Employee's manager
+        // Get the Employee's role
+        const empInfo = await this.getEmployees();
+        empInfo.push({ value: null, name: 'No one' });
+        const { empManager } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'empManager',
+                message: 'Who is this employee\'s manager?',
+                choices: empInfo
+            },
+        ]);
+        // Once we have everything, let's add our new employee to the database
+        this.pool.query(`INSERT INTO employee (first_name, last_name, role_id, manager_id) VALUES ($1, $2, $3, $4);`, [empFirstName, empLastName, empRole, empManager], (err, _result) => {
+            if (err) {
+                console.log(err);
+            }
+            else {
+                console.log(`New employee ${empFirstName} ${empLastName} successfully added!`);
+            }
+        });
     }
     ;
+    async updateEmployee() {
+        // Prompt the user for the employee whose info they want to update
+        // But first, we need to figure out who our employees are to begin with!
+        const empInfo = await this.getEmployees();
+        empInfo.push({ value: null, name: 'No one' });
+        const { empToUpdate } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'empToUpdate',
+                message: 'Which employee do you want to update?',
+                choices: empInfo
+            },
+        ]);
+        // If for whatever reason they user picked "No one", they should be returned to the main menu.
+        if (empToUpdate !== 'No one') {
+            // Prompt the user for the new role this employee is to assume
+            const empRoles = await this.getRoles();
+            const { newRole } = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'newRole',
+                    message: 'What role does this employee have?',
+                    choices: empRoles
+                },
+            ]);
+            // Prompt the user for the new manager this employee is to have
+            const empInfo = await this.getEmployees();
+            // Indexing for SQL starts at one, but in .js it starts at 0...
+            empInfo[empToUpdate - 1].name = 'No one';
+            let { newManager } = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'newManager',
+                    message: 'Who is this employee\'s new manager?',
+                    choices: empInfo
+                },
+            ]);
+            if (newManager === empToUpdate) {
+                newManager = null;
+            }
+            // Once we have everything, let's update our database with the new entry
+            const query = `
+                UPDATE employee
+                SET
+                    role_id = $1,
+                    manager_id = $2
+                WHERE id = $3;
+            `;
+            this.pool.query(query, [newRole, newManager, empToUpdate], (err, _result) => {
+                if (err) {
+                    console.log(err);
+                }
+                else {
+                    console.log(`Employee updated!`);
+                }
+            });
+        }
+    }
 }
 const cli = new Cli(pool);
 cli.mainMenu();
